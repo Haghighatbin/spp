@@ -1,73 +1,124 @@
 import pandas as pd
 import matplotlib.dates as mdates
-import matplotlib.pyplot as plt
+import plotly.express as px
+print('plotly library imported...')
 import datetime as dt
+import time
 
 import numpy as np
-from tensorflow.keras.models import Sequential
-from tensorflow.keras.layers import *
+from tensorflow.keras.models import Sequential, load_model
+from tensorflow.keras.layers import LSTM, Dense, Flatten
 from tensorflow.keras.callbacks import EarlyStopping
-
+print('tensorflow library imported...')
 from sklearn.preprocessing import MinMaxScaler, StandardScaler
 from sklearn.metrics import mean_squared_error,mean_absolute_percentage_error
 from sklearn.model_selection import train_test_split, TimeSeriesSplit
+print('sklearn library imported...')
 
-stock_data = pd.read_csv('./NFLX.csv', index_col='Date')
-print(stock_data.head())
+class StockPricePredictor:
+    def __init__(self) -> None:
+        pass
 
-# plt.figure(figsize=(15,10))
-# plt.gca().xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m-%d'))
-# plt.gca().xaxis.set_major_locator(mdates.DayLocator(interval=60))
-# x_dates = [dt.datetime.strptime(d, '%Y-%m-%d').date() for d in stock_data.index.values]
+    def read_data(self, filename, index_col='Date'):
+        print('in read')
+        try:
+            print('Reading dataset...')
+            return pd.read_csv(filename, index_col=index_col)
+        except Exception as e:
+            print(e)
+    
+    def spp_plot(self, data, template='plotly_dark'):
+        fig = px.line(data, template=template)
+        fig.show()
+    
+    def spp_scaler(self, data, scaler):
+        scaled_data = scaler.fit_transform(data.values)
+        scaled_data = pd.DataFrame(columns=data.columns, data=scaled_data, index=data.index)
+        print(f'\nX_feat after transforming to Dataframe -> \n{scaled_data.head()}')
+        return scaled_data
 
-# plt.plot(x_dates, stock_data['High'], label='High')
-# plt.plot(x_dates, stock_data['Low'], label='Low')
-# plt.xlabel('Time Scale')
-# plt.ylabel('Scaled USD')
-# plt.legend()
-# plt.gcf().autofmt_xdate()
-# plt.show()
+    def spp_lstm_split(self, data, steps=10):
+        X, y = [], []
+        for i in range(len(data)- steps - 1):
+            X.append(data[i:i + steps, :-1])
+            y.append(data[i + steps-1, -1])
 
-target_y = stock_data['Close']
-X_feat = stock_data.iloc[:,0:3]
+        return np.array(X), np.array(y)
 
-# Feature Scaling
-sc = StandardScaler() # MinMaxScaler is another method
-X_ft = sc.fit_transform(X_feat.values)
-X_ft = pd.DataFrame(columns=X_feat.columns, data=X_ft, index=X_feat.index)
-print(X_ft)
+    def spp_data_split(self, x_data, y_data, date_idx, split=0.8):
+        split_idx = int(np.ceil(len(x_data) * split))
+        date_index = date_idx
 
-def lstm_split(data, n_steps):
-    X, y = [], []
-    for i in range(len(data)-n_steps-1):
-        X.append(data[i:i + n_steps, :-1])
-        y.append(data[i + n_steps-1, -1])
+        X_train, X_test = x_data[:split_idx], x_data[split_idx:]
+        y_train, y_test = y_data[:split_idx], y_data[split_idx:]
+        X_train_date, X_test_date = date_index[:split_idx], date_index[split_idx]
 
-    return np.array(X), np.array(y)
+        print(f'\n### After Splitting by {split} ###\n X1 Shape: {x_data.shape}\n X_train Shape: {X_train.shape}\n X_test Shape: {X_test.shape}\n y_test Shape: {y_test.shape}')
+        return X_train, X_test, X_train_date, X_test_date, y_train, y_test
+    
+    def spp_lstm_init(self, training_data, model, lstm_cells, dense_cells, optimizer='adam', activation='relu', loss='mean_squared_error', return_sequences=True):
+        print('\nLong-Short-Term-Memory (LSTMS) was set to [Sequential]...')
+        print('\nAdding layers:')
+        model.add(LSTM(lstm_cells, input_shape=(training_data.shape[1], training_data.shape[2]), activation=activation, return_sequences=return_sequences))
+        print('LSTM layer with 32 cells (activation = [ReLu]) were added...')
+        model.add(Dense(dense_cells))
+        print('Dense layer with 1 cell was added...')
+        model.compile(loss=loss, optimizer=optimizer)
+        print('\nLSTM model was compiled with loss set to [mean_squared_error] and Optimizer set to [Adam]...')
+        print('LSTM model summary:')
+        model.summary()
+        return model
 
-X1, y1 = lstm_split(X_ft.values, n_steps=2)
-train_split = 0.8
-split_idx = int(np.ceil(len(X1) * train_split))
-date_index = X_ft.index
+    def spp_fit(self, model, x_train_data, y_train_data, x_test_data, epochs=100, batch_size=4, verbose='auto', shuffle=False):
+        print('\nInitialising the fitting/training process...')
+        history = model.fit(x_train_data, y_train_data, epochs=epochs, batch_size=batch_size, verbose=verbose, shuffle=shuffle)
+        print('\nInitialising the prediction process...')
+        y_pred = model.predict(x_test_data)
+        return history, y_pred
 
-X_train, X_test = X1[:split_idx], X1[split_idx:]
-y_train, y_test = y1[:split_idx], y1[split_idx:]
-X_train_date, X_test_date = date_index[:split_idx], date_index[split_idx]
+def main():
+    spp = StockPricePredictor()
+    stock_data = spp.read_data('./NFLX.csv')
+    print(f'\nraw dataset head: \n{stock_data.head()}')
 
-print(X1.shape, X_train.shape, X_test.shape, y_test.shape)
+    target_y = stock_data['Close']
+    print('target was sorted based on [Close] cloumn header...')
+    X_feat = stock_data.iloc[:, 0:3]
+    print(f'\nX_feat after cropped iloc [:, 0:3] -> \n{X_feat.head()}')
 
+    # Presenting the raw data
+    # spp.spp_plot(X_feat)
 
-lstm = Sequential()
-lstm.add(LSTM(32, input_shape=(X_train.shape[1], X_train.shape[2]), activation='relu', return_sequences=True))
-lstm.add(Dense(1))
-lstm.compile(loss='mean_squared_error', optimizer='adam')
-lstm.summary()
+    # Feature Scaling
+    print('X_feat will be transformed based on StandardScaler...other option is MinMaxScaler')
+    X_ft = spp.spp_scaler(X_feat, StandardScaler())
 
-history = lstm.fit(X_train, y_train, epochs=100, batch_size=4, verbose=2, shuffle=False)
-y_pred = lstm.predict(X_test)
-print(y_pred)
-rmse = mean_squared_error(y_test, y_pred, squared=False)
-mape = mean_absolute_percentage_error(y_test, y_pred)
-print(f'RMSE = {rmse}')
-print(f'MAPE = {mape}')
+    X1, y1 = spp.spp_lstm_split(X_ft.values)
+    print(f'\nX1:\n{X1[:3]}')
+    print(f'\ny1:\n{y1[:3]}')
+
+    X_train, X_test, X_train_date, X_test_date, y_train, y_test = spp.spp_data_split(X1, y1, X_ft.index)
+    # lstm_model = spp.spp_lstm_init(X_train, Sequential(), lstm_cells=32, dense_cells=1)
+
+    # history, prediction = spp.spp_fit(lstm_model, X_train, y_train, X_test)
+    # timestamp = time.strftime("%Y%m%d-%H%M%S")
+    # lstm_model.save(f'saved_models/model-{timestamp}')
+    loaded_model = load_model('saved_models/model-20230223-165603')
+    loaded_model.summary()
+    prediction = loaded_model.predict(X_test)
+    print(type(prediction), prediction.shape)
+    print(type(X_test), X_test.shape)
+    data = pd.DataFrame(data=X_test[0])
+
+    fig = px.line(data)
+    fig.show()
+
+    # print(history, prediction)
+    # rmse = mean_squared_error(y_test, y_pred, squared=False)
+    # mape = mean_absolute_percentage_error(y_test, y_pred)
+    # print(f'RMSE = {rmse}')
+    # print(f'MAPE = {mape}')
+
+if __name__ == "__main__":
+    main()
 
